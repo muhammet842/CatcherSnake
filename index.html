@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Catcher Snake Game</title>
+        <style>
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body{
+                background-color: #111;
+                color: #fff;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                font-family: monospace;
+            }
+
+            .game-panel {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+                padding: 20px 18px 18px;
+                border-radius: 18px;
+                background: rgba(14, 25, 18, 0.82);
+                box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+            }
+
+            .title {
+                font-size: 2.3rem;
+                letter-spacing: 0.2em;
+                font-weight: 800;
+                color: #d3d3d3;
+            }
+
+            .hud {
+                width: 100%;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                padding: 10px 8px;
+            }
+
+            .difficulty-group,
+            .mode-group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .difficulty-group label,
+            .mode-group label {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .difficulty-group label,
+            .mode-group label {
+                font-size: 0.9rem;
+            }
+
+            .difficulty-btns {
+                display: flex;
+                gap: 6px;
+            }
+
+            .difficulty-btn,
+            .mode-select {
+                border: 1px solid rgba(158, 245, 181, 0.4);
+                background: #132317;
+                color: #f4fff8;
+                border-radius: 8px;
+                padding: 7px 12px;
+                cursor: pointer;
+            }
+
+            .difficulty-btn.active {
+                background: #a1a1a1;
+                color: #06230d;
+                font-weight: 700;
+            }
+
+            #mode-select {
+                min-width: 150px;
+            }
+
+            .scoreboard {
+                display: flex;
+                gap: 18px;
+            }
+
+            .scoreboard span {
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+                padding: 6px 10px;
+            }
+
+            .canvas-wrap {
+                position: relative;
+            }
+
+            canvas{
+                width: 600px;
+                height: 600px;
+                display: block;
+                border-radius: 10px;
+                border: 4px solid #080808;
+                background-color: #060d09;
+            }
+
+            .overlay {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                padding: 20px;
+                background: rgba(3, 8, 6, 0.6);
+                font-size: 1.35rem;
+                line-height: 1.5;
+                border-radius: 10px;
+            }
+
+            .overlay.hidden {
+                display: none;
+            }
+
+        </style>
+    </head>
+    <body>
+        <div class="game-panel">
+            <div class="title">SNAKE</div>
+
+            <div class="hud">
+                <div class="difficulty-group">
+                    <label>Difficulty:</label>
+                    <div class="difficulty-btns">
+                        <button class="difficulty-btn" data-difficulty="easy" type="button">Easy</button>
+                        <button class="difficulty-btn active" data-difficulty="medium" type="button">Medium</button>
+                        <button class="difficulty-btn" data-difficulty="hard" type="button">Hard</button>
+
+                    </div>
+                </div>
+                <div class="mode-group">
+                    <label>Mode:</label>
+                    <select id="modeSelect" class="mode-select" aria-label="Game Mode">
+                        <option value="classic">Classic</option>
+                        <option value="portal">Portal</option>
+                    </select>
+                </div>
+            </div>
+            <div class="scoreboard">
+                <span>Score: <strong id="score">0</strong></span>
+                <span>Best: <strong id="highScore">0</strong></span>
+            </div>
+
+            <div class="canvas-wrap">
+                <canvas id="gameCanvas" width="600" height="600"></canvas>
+                <div id="overlay" class="overlay">Click a key to start the game</div>
+            </div>
+        </div>
+        
+        <script>
+            const canvas = document.getElementById("gameCanvas");
+            const ctx = canvas.getContext("2d");
+            const overlay = document.getElementById("overlay");
+            const scoreEl = document.getElementById("score");
+            const highScoreEl = document.getElementById("highScore");
+            const modeSelect = document.getElementById("modeSelect");
+            const difficultyButtons = document.querySelectorAll(".difficulty-btn")
+            
+            const gridSize = 20;
+            const tileCount = canvas.width / gridSize;
+            const difficulties = {
+                easy: 170,
+                medium: 120,
+                hard: 80
+            }
+
+            let snake = [];
+            let food = { x: 0, y: 0 };
+            let dx = 1;
+            let dy = 0;
+            let score = 0; 
+            let gameStarted = false;
+            let gameRunning = false;
+            let gameLoopId = null;
+            let currentDifficulty = "medium";
+            let currentMode = "classic";
+            let highScore = Number(localStorage.getItem("snakeHighScore") || 0);
+
+            function setOverlay(message, visible = true){
+                overlay.textContent = message;
+                overlay.classList.toggle("hidden", !visible);
+            }
+
+            function updateScoreUI() {
+                scoreEl.textContent = String(score);
+                highScoreEl.textContent = String(highScore);
+            }
+
+            function setDifficulty(value) {
+                currentDifficulty = value;
+                difficultyButtons.forEach((button) => {
+                    button.classList.toggle("active", button.dataset.difficulty === value);
+                });
+
+                if(gameRunning && gameLoopId) {
+                    clearInterval(gameLoopId);
+                    gameLoopId = setInterval(gameTick, difficulties[currentDifficulty]);
+                }
+            }
+
+            function setMode(value) {
+                currentMode = value;
+            }
+
+            function resetGame() {
+                snake = [
+                    { x: 12, y: 15 },
+                    { x: 11, y: 15 },
+                    { x: 10, y: 15 },
+                ];
+
+                dx = 1;
+                dy = 0;
+                score = 0;
+                updateScoreUI();
+                generateFood();
+                draw();
+            }
+
+            function generateFood() {
+                const freeCells = [];
+
+                for(let y = 0; y < tileCount; y++){
+                    for(let x = 0; x < tileCount; x++){
+                            const occupied = snake.some(segment => segment.x === x && segment.y === y);                        if(!occupied){
+                            freeCells.push({ x, y});
+                        }
+                    }
+                }
+
+                if(freeCells.length === 0){
+                    endGame();
+                    return;
+                }
+
+                const chosen = freeCells[Math.floor(Math.random() * freeCells.length)];
+                food = chosen;
+            }
+
+            function startGame() {
+                if(gameLoopId) {
+                    clearInterval(gameLoopId);
+                }
+
+                gameStarted = true;
+                gameRunning = true;
+                setOverlay("");
+                gameLoopId = setInterval(gameTick, difficulties[currentDifficulty]);
+            }
+
+            function endGame() {
+                gameRunning = false;
+
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem("snakeHighScore", String(highScore));                }
+
+                updateScoreUI();
+                setOverlay("Game is over! Score: " + score + " - Press any button to start again", true);
+            
+                if(gameLoopId){
+                    clearInterval(gameLoopId);
+                    gameLoopId = null;
+                }
+            }
+
+            function handleDirectionInput(event) {
+                const key = event.key;
+                const directionMap = {
+                    ArrowLeft: [-1, 0],
+                    ArrowRight: [1, 0],
+                    ArrowUp: [0, -1],
+                    ArrowDown: [0, 1],
+                    a: [-1, 0],
+                    d: [1, 0],
+                    w: [0, -1],
+                    s: [0, 1]
+                };
+
+                if(!(key in directionMap)){
+                    return;
+                }
+
+                const [nextDx, nextDy] = directionMap[key];
+
+                if(nextDx === -dx && nextDy === -dy && snake.length > 1){
+                    return;
+                }
+
+                event.preventDefault();
+
+                if(!gameStarted || !gameRunning){
+                    dx = nextDx;
+                    dy = nextDy;
+                    resetGame();
+                    startGame();
+                    return;
+                }
+
+                dx = nextDx;
+                dy = nextDy;
+            }
+
+            function gameTick(){
+                if(!gameRunning) {
+                    return;
+                }
+
+                const nextHead = {
+                    x: snake[0].x + dx,
+                    y: snake[0].y + dy
+                };
+
+                if(currentMode === "portal"){
+                    if(nextHead.x < 0) nextHead.x = tileCount - 1;
+                    if(nextHead.x >= tileCount) nextHead.x = 0;
+                    if(nextHead.y < 0) nextHead.y = tileCount - 1;
+                    if(nextHead.y >= tileCount) nextHead.y = 0;
+                }
+                else {
+                    if(nextHead.x < 0 || nextHead.x >= tileCount || nextHead.y < 0 || nextHead.y >= tileCount) {
+                        endGame();
+                        draw();
+                        return;
+                    }
+                }
+
+                snake.unshift(nextHead);
+
+                const ateFood = nextHead.x === food.x && nextHead.y === food.y;
+
+                if(ateFood){
+                    score += 10;
+                    if(score > highScore){
+                        highScore = score;
+                        localStorage.setItem("snakeHighScore", String(highScore));
+                    }
+
+                    updateScoreUI();
+                    generateFood();
+                }
+                else {
+                    snake.pop();
+                }
+
+                for(let i = 1; i < snake.length; i++){
+                    if(snake[i].x === nextHead.x && snake[i].y === nextHead.y){
+                        endGame();
+                        draw();
+                        return;
+                    }
+                }
+
+                draw();
+            }
+
+            function drawGrid() {
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+                ctx.lineWidth = 1;
+
+                for(let i = 0; i <= tileCount; i++) {
+                    const position = i * gridSize;
+                    ctx.beginPath();
+                    ctx.moveTo(position, 0);
+                    ctx.lineTo(position, canvas.height);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(0, position);
+                    ctx.lineTo(canvas.width, position);
+                    ctx.stroke();
+                }
+            }
+
+            function draw() {
+                ctx.fillStyle = "#050d09";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                drawGrid();
+
+                ctx.fillStyle = "#ff4d6d";
+                ctx.fillRect(food.x * gridSize + 3, food.y * gridSize + 3, gridSize - 6, gridSize - 6);
+
+                snake.forEach((segment, index) => {
+                    const x = segment.x * gridSize + 1;
+                    const y = segment.y * gridSize + 1;
+                    const size = index === 0 ? gridSize - 2 : gridSize - 4;
+
+                    ctx.fillStyle = index === 0 ? "#7dff9a" : "#2bb673";
+                    ctx.fillRect(x, y, size, size);
+
+                    if(index === 0) {
+                        ctx.strokeStyle = "#d9ffdf";
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
+                    }
+                });
+            }
+
+            difficultyButtons.forEach((button) => {
+                button.addEventListener("click", () => setDifficulty(button.dataset.difficulty));
+            });
+
+            modeSelect.addEventListener("change", (event) => {
+                setMode(event.target.value);
+                if(!gameStarted){
+                    setOverlay("Press any key to start to game", true);
+                }
+            });
+
+            document.addEventListener("keydown", handleDirectionInput);
+
+            updateScoreUI();
+            setDifficulty("medium");
+            resetGame();
+            setOverlay("Press any key to start the game", true);
+        </script>
+    </body>
+</html>
