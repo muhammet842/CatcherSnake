@@ -18,6 +18,7 @@
                 align-items: center;
                 justify-content: center;
                 height: 100vh;
+                min-height: 100vh;
                 margin: 0;
             }
 
@@ -90,7 +91,13 @@
                 font-weight: 700;
             }
 
-            #mode-select {
+            .difficulty-btn:disabled,
+            .mode-select:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+
+            #modeSelect {
                 min-width: 150px;
             }
 
@@ -138,7 +145,7 @@
     </head>
     <body>
         <div class="game-panel">
-            <div class="title">SNAKE</div>
+            <div class="title">CATCHER SNAKE</div>
 
             <div class="hud">
                 <div class="difficulty-group">
@@ -176,8 +183,8 @@
             const scoreEl = document.getElementById("score");
             const highScoreEl = document.getElementById("highScore");
             const modeSelect = document.getElementById("modeSelect");
-            const difficultyButtons = document.querySelectorAll(".difficulty-btn")
-            
+            const difficultyButtons = document.querySelectorAll(".difficulty-btn");
+
             const gridSize = 20;
             const tileCount = canvas.width / gridSize;
             const difficulties = {
@@ -186,8 +193,15 @@
                 hard: 80
             }
 
+            const powerUpColors = {
+                gold: "#ffeb3b",
+                slow: "#4caf50",
+                shield: "#00bcd4"
+            };
+
             let snake = [];
             let food = { x: 0, y: 0 };
+            let powerUps = [];
             let dx = 1;
             let dy = 0;
             let score = 0; 
@@ -197,6 +211,11 @@
             let currentDifficulty = "medium";
             let currentMode = "classic";
             let highScore = Number(localStorage.getItem("snakeHighScore") || 0);
+
+            let slowActiveUntil = 0;
+            let shieldActiveUntil = 0;
+            let nextPowerUpSpawnAt = Date.now() + 4000;
+            let tickCounter = 0;
 
             function setOverlay(message, visible = true){
                 overlay.textContent = message;
@@ -208,7 +227,16 @@
                 highScoreEl.textContent = String(highScore);
             }
 
+            function lockSettings() {
+                difficultyButtons.forEach((button) => {
+                    button.disabled = gameRunning;
+                });
+                modeSelect.disabled = gameRunning;
+            }
+
             function setDifficulty(value) {
+                if(gameRunning) return;
+
                 currentDifficulty = value;
                 difficultyButtons.forEach((button) => {
                     button.classList.toggle("active", button.dataset.difficulty === value);
@@ -221,19 +249,42 @@
             }
 
             function setMode(value) {
+                if(gameRunning) return;
                 currentMode = value;
+            }
+
+            function isCellOccupied(x, y, ignoreFood = false) {
+                if(snake.some((segment) => segment.x === x && segment.y === y)) {
+                    return true;
+                }
+
+                if(!ignoreFood && food.x === x && food.y === y) {
+                    return true;
+                }
+
+                if(powerUps.some((powerUp) => powerUp.x === x && powerUp.y === y)) {
+                    return true;
+                }
+
+                return false;
             }
 
             function resetGame() {
                 snake = [
                     { x: 12, y: 15 },
                     { x: 11, y: 15 },
-                    { x: 10, y: 15 },
+                    { x: 10, y: 15 }
                 ];
 
                 dx = 1;
                 dy = 0;
                 score = 0;
+                powerUps = [];
+                slowActiveUntil = 0;
+                shieldActiveUntil = 0;
+                tickCounter = 0;
+                nextPowerUpSpawnAt = Date.now() + 4000;
+
                 updateScoreUI();
                 generateFood();
                 draw();
@@ -255,8 +306,54 @@
                     return;
                 }
 
-                const chosen = freeCells[Math.floor(Math.random() * freeCells.length)];
-                food = chosen;
+                food = freeCells[Math.floor(Math.random() * freeCells.length)];
+            }
+
+            function spawnPowerUp(force = false) {
+                if(powerUps.length > 0) return;
+
+                if(!force && Date.now() < nextPowerUpSpawnAt) return;
+
+                const types = ["gold", "slow", "shield"];
+                const type = types[Math.floor(Math.random() * types.length)];
+
+                const freeCells = [];
+
+                for(let y = 0; y < tileCount; y++) {
+                    for(let x = 0; x < tileCount; x++) {
+                        if(isCellOccupied(x, y, false)) continue;
+                        freeCells.push({ x, y});
+                    }
+                }
+
+                if(freeCells.length === 0) return;
+
+                const cell = freeCells[Math.floor(Math.random() * freeCells.length)];
+                powerUps.push({
+                    type,
+                    x: cell.x,
+                    y: cell.y,
+                    ttl: 7000 + Math.random() * 2500,
+                    createdAt: Date.now()
+                });
+
+                nextPowerUpSpawnAt = Date.now() + 5000 + Math.random() * 4000;
+            }
+
+            function applyPowerUp(powerUpType) {
+                if (powerUpType === "gold") {
+                    score += 50;
+                }
+
+                if (powerUpType === "slow") {
+                    slowActiveUntil = Date.now() + 5000;
+                }
+
+                if (powerUpType === "shield") {
+                    shieldActiveUntil = Date.now() + 6000;
+                }
+
+                updateScoreUI();
             }
 
             function startGame() {
@@ -266,17 +363,20 @@
 
                 gameStarted = true;
                 gameRunning = true;
+                lockSettings();
                 setOverlay("");
                 gameLoopId = setInterval(gameTick, difficulties[currentDifficulty]);
             }
 
             function endGame() {
                 gameRunning = false;
+                lockSettings();
 
                 if (score > highScore) {
                     highScore = score;
-                    localStorage.setItem("snakeHighScore", String(highScore));                }
-
+                    localStorage.setItem("snakeHighScore", String(highScore));
+                }
+                
                 updateScoreUI();
                 setOverlay("Game is over! Score: " + score + " - Press any button to start again", true);
             
@@ -328,6 +428,15 @@
                     return;
                 }
 
+                tickCounter++;
+
+                const isSlowActive = slowActiveUntil > Date.now();
+
+                if(isSlowActive && tickCounter % 2 === 1) {
+                    draw();
+                    return;
+                }
+
                 const nextHead = {
                     x: snake[0].x + dx,
                     y: snake[0].y + dy
@@ -340,10 +449,16 @@
                     if(nextHead.y >= tileCount) nextHead.y = 0;
                 }
                 else {
-                    if(nextHead.x < 0 || nextHead.x >= tileCount || nextHead.y < 0 || nextHead.y >= tileCount) {
-                        endGame();
-                        draw();
-                        return;
+                    if (nextHead.x < 0 || nextHead.x >= tileCount || nextHead.y < 0 || nextHead.y >= tileCount) {
+                        if (shieldActiveUntil > Date.now()) {
+                            nextHead.x = Math.max(0, Math.min(tileCount - 1, nextHead.x));
+                            nextHead.y = Math.max(0, Math.min(tileCount - 1, nextHead.y));
+                        } 
+                        else {
+                            endGame();
+                            draw();
+                            return;
+                        }
                     }
                 }
 
@@ -360,6 +475,10 @@
 
                     updateScoreUI();
                     generateFood();
+
+                    if(Math.random() < 0.4) {
+                        spawnPowerUp(true);
+                    }
                 }
                 else {
                     snake.pop();
@@ -371,6 +490,22 @@
                         draw();
                         return;
                     }
+                }
+
+                powerUps = powerUps.filter((powerUp) => {
+                    const expired = Date.now() - powerUp.createdAt > powerUp.ttl;
+                    return !expired;
+                });
+
+                const collectedPowerUp = powerUps.find((powerUp) => powerUp.x === nextHead.x && powerUp.y === nextHead.y);
+
+                if (collectedPowerUp) {
+                    applyPowerUp(collectedPowerUp.type);
+                    powerUps = powerUps.filter((powerUp) => powerUp !== collectedPowerUp);
+                }
+
+                if (powerUps.length === 0 && Date.now() >= nextPowerUpSpawnAt) {
+                    spawnPowerUp();
                 }
 
                 draw();
@@ -394,6 +529,27 @@
                 }
             }
 
+            function drawPowerUp(powerUp) {
+                const cx = powerUp.x * gridSize + gridSize / 2;
+                const cy = powerUp.y * gridSize + gridSize / 2;
+                const size = gridSize * 0.52;
+
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.beginPath();
+                ctx.moveTo(0, -size / 2);
+                ctx.lineTo(size / 2, 0);
+                ctx.lineTo(0, size / 2);
+                ctx.lineTo(-size / 2, 0);
+                ctx.closePath();
+                ctx.fillStyle = powerUpColors[powerUp.type];
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = "rgba(255,255,255,0.8)";
+                ctx.stroke();
+                ctx.restore();
+            }
+
             function draw() {
                 ctx.fillStyle = "#050d09";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -403,6 +559,8 @@
                 ctx.fillStyle = "#ff4d6d";
                 ctx.fillRect(food.x * gridSize + 3, food.y * gridSize + 3, gridSize - 6, gridSize - 6);
 
+                powerUps.forEach((powerUp) => drawPowerUp(powerUp));
+
                 snake.forEach((segment, index) => {
                     const x = segment.x * gridSize + 1;
                     const y = segment.y * gridSize + 1;
@@ -411,10 +569,18 @@
                     ctx.fillStyle = index === 0 ? "#7dff9a" : "#2bb673";
                     ctx.fillRect(x, y, size, size);
 
-                    if(index === 0) {
+                    if (index === 0) {
                         ctx.strokeStyle = "#d9ffdf";
                         ctx.lineWidth = 1.5;
                         ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
+
+                        if (shieldActiveUntil > Date.now()) {
+                            ctx.beginPath();
+                            ctx.arc(x + size / 2, y + size / 2, size / 1.2, 0, Math.PI * 2);
+                            ctx.strokeStyle = "rgba(0,188,212,0.8)";
+                            ctx.lineWidth = 2;
+                            ctx.stroke();
+                        }
                     }
                 });
             }
@@ -424,8 +590,13 @@
             });
 
             modeSelect.addEventListener("change", (event) => {
+                if (gameRunning) {
+                    event.target.value = currentMode;
+                    return;
+                }
+
                 setMode(event.target.value);
-                if(!gameStarted){
+                if (!gameStarted) {
                     setOverlay("Press any key to start to game", true);
                 }
             });
@@ -433,6 +604,7 @@
             document.addEventListener("keydown", handleDirectionInput);
 
             updateScoreUI();
+            lockSettings();
             setDifficulty("medium");
             resetGame();
             setOverlay("Press any key to start the game", true);
